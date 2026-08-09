@@ -8,11 +8,6 @@ import (
 
 const modulePath = "github.com/goravel/slack"
 
-// ServiceProvider extends the notification.Manager with the Slack
-// channel — it registers nothing of its own in the container, only
-// calling Extend() on a binding (Notification) owned by a different
-// module. Register() is intentionally a no-op.
-
 type ServiceProvider struct{}
 
 func (r *ServiceProvider) Relationship() binding.Relationship {
@@ -20,7 +15,6 @@ func (r *ServiceProvider) Relationship() binding.Relationship {
 		Bindings: []string{},
 		Dependencies: []string{
 			binding.Notification,
-			binding.Http,
 			binding.Config,
 		},
 		ProvideFor: []string{},
@@ -28,10 +22,11 @@ func (r *ServiceProvider) Relationship() binding.Relationship {
 }
 
 func (r *ServiceProvider) Register(app foundation.Application) {
-	// Nothing to register
+	// Nothing to register.
 }
 
 func (r *ServiceProvider) Boot(app foundation.Application) {
+
 	app.Publishes(modulePath, map[string]string{
 		"config/slack.go": app.ConfigPath("slack.go"),
 	})
@@ -39,12 +34,6 @@ func (r *ServiceProvider) Boot(app foundation.Application) {
 	notificationFacade := app.MakeNotification()
 	if notificationFacade == nil {
 		color.Warningln("Notification Facade is not initialized. Skipping Slack channel registration.")
-		return
-	}
-
-	httpFacade := app.MakeHttp()
-	if httpFacade == nil {
-		color.Warningln("Http Facade is not initialized. Skipping Slack channel registration.")
 		return
 	}
 
@@ -56,5 +45,5 @@ func (r *ServiceProvider) Boot(app foundation.Application) {
 
 	token := config.GetString("slack.token")
 
-	notificationFacade.Extend(NewChannel(httpFacade, token))
+	notificationFacade.Extend(NewChannel(token, nil))
 }

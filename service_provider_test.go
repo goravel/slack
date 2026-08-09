@@ -9,7 +9,6 @@ import (
 	"github.com/goravel/framework/contracts/binding"
 	mocksconfig "github.com/goravel/framework/mocks/config"
 	mocksfoundation "github.com/goravel/framework/mocks/foundation"
-	mocksclient "github.com/goravel/framework/mocks/http/client"
 	mocksnotification "github.com/goravel/framework/mocks/notification"
 )
 
@@ -19,8 +18,8 @@ func TestServiceProviderRelationship(t *testing.T) {
 
 	assert.Empty(t, rel.Bindings)
 	assert.Contains(t, rel.Dependencies, binding.Notification)
-	assert.Contains(t, rel.Dependencies, binding.Http)
 	assert.Contains(t, rel.Dependencies, binding.Config)
+	assert.NotContains(t, rel.Dependencies, binding.Http, "Http dropped — slack-go/slack manages its own client now")
 	assert.Empty(t, rel.ProvideFor)
 }
 
@@ -53,27 +52,12 @@ func TestServiceProviderBoot_SkipsWhenNotificationFacadeNotSet(t *testing.T) {
 	})
 }
 
-func TestServiceProviderBoot_SkipsWhenHttpFacadeNotSet(t *testing.T) {
-	provider := &ServiceProvider{}
-	app := mocksfoundation.NewApplication(t)
-	expectPublishes(app)
-	mgr := mocksnotification.NewManager(t)
-	app.EXPECT().MakeNotification().Return(mgr).Once()
-	app.EXPECT().MakeHttp().Return(nil).Once()
-
-	assert.NotPanics(t, func() {
-		provider.Boot(app)
-	})
-}
-
 func TestServiceProviderBoot_SkipsWhenConfigFacadeNotSet(t *testing.T) {
 	provider := &ServiceProvider{}
 	app := mocksfoundation.NewApplication(t)
 	expectPublishes(app)
 	mgr := mocksnotification.NewManager(t)
-	http := mocksclient.NewFactory(t)
 	app.EXPECT().MakeNotification().Return(mgr).Once()
-	app.EXPECT().MakeHttp().Return(http).Once()
 	app.EXPECT().MakeConfig().Return(nil).Once()
 
 	assert.NotPanics(t, func() {
@@ -89,7 +73,6 @@ func TestServiceProviderBoot_ExtendsNotificationManager(t *testing.T) {
 	config := mocksconfig.NewConfig(t)
 
 	app.EXPECT().MakeNotification().Return(mgr).Once()
-	app.EXPECT().MakeHttp().Return(mocksclient.NewFactory(t)).Once()
 	app.EXPECT().MakeConfig().Return(config).Once()
 	config.EXPECT().GetString("slack.token").Return("xoxb-test").Once()
 	mgr.EXPECT().Extend(mock.AnythingOfType("*slack.Channel")).Once()

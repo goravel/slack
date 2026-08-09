@@ -3,7 +3,8 @@ module github.com/goravel/slack
 go 1.25.0
 
 require (
-	github.com/goravel/framework v1.18.0
+	github.com/goravel/framework v1.18.1-0.20260727074755-0c23dc0eced2
+	github.com/slack-go/slack v0.17.3
 	github.com/spf13/cast v1.10.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -42,6 +43,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmoiron/sqlx v1.4.0 // indirect
@@ -91,9 +93,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.31.2 // indirect
 )
-
-// NOTE: exact framework version and any additional indirect
-// dependencies need `go mod tidy` run against the real module once this
-// is a real repo — this is a starting skeleton, not a verified go.sum.
-
-replace github.com/goravel/framework => /Users/codesultan/Golang/framework

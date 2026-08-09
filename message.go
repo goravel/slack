@@ -16,22 +16,19 @@ type Notification interface {
 
 // Message is a chat.postMessage payload. See
 // https://api.slack.com/methods/chat.postMessage for field semantics.
-// Only the fields commonly needed for notifications are exposed —
-// Blocks (Block Kit) is deliberately left as raw json.RawMessage rather
-// than a typed builder, since Block Kit's schema is large and mostly
-// orthogonal to what a "send a notification" use case needs; pass
-// pre-built JSON if you need it.
+//
+// No Blocks (Block Kit) field — slack-go/slack's MsgOptionBlocks needs
+// typed Block objects, not raw JSON, and building a typed Block Kit
+// API is out of scope for this rewrite. Attachments cover the common
+// "title + fields + color" notification case; add Block Kit support
+// later if a real need shows up.
 type Message struct {
-	// Text is the fallback/plain-text message body. Required by Slack
-	// even when Blocks is set (used for notifications, screen readers).
+	// Text is the fallback/plain-text message body.
 	Text string
 	// Attachments are legacy secondary-message attachments — still
 	// supported by chat.postMessage, simpler than Block Kit for basic
 	// "title + fields + color" use cases.
 	Attachments []Attachment
-	// Blocks is raw Block Kit JSON (a JSON array), for callers that need
-	// richer layouts than Attachments supports. Leave nil to omit.
-	Blocks []byte
 	// ThreadTS, if set, posts this message as a reply in the given
 	// thread (Slack's "ts" of the parent message).
 	ThreadTS string
