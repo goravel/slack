@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	mockslog "github.com/goravel/framework/mocks/log"
 	"github.com/goravel/framework/notification"
@@ -25,6 +26,12 @@ func TestLiveSlackChannel(t *testing.T) {
 	}
 
 	logger := mockslog.NewLog(t)
+	// On delivery failure the notification manager logs via Errorf before
+	// returning the error. Without this permissive expectation, that would
+	// trip testify's "unexpected call" guard and mask the real Slack error
+	// (e.g. not_in_channel). Success path never calls Errorf.
+	logger.On("Errorf", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
 	manager := notification.NewManager(logger, nil)
 	manager.Extend(slack.NewChannel(token, nil))
 
