@@ -1,0 +1,35 @@
+package slack_test
+
+import (
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	mockslog "github.com/goravel/framework/mocks/log"
+	"github.com/goravel/framework/notification"
+
+	"github.com/goravel/slack"
+)
+
+// TestLiveSlackChannel sends a real Slack message through the framework's
+// notification manager — the same full path an app uses, rather than
+// calling the channel directly. Mirrors the framework's own live SMTP
+// suite (framework/mail/application_test.go): skipped locally unless the
+// env vars are set, exercised for real in CI via .github/workflows/slack.yml.
+func TestLiveSlackChannel(t *testing.T) {
+	token := os.Getenv("SLACK_BOT_TOKEN")
+	channel := os.Getenv("SLACK_CHANNEL")
+	if token == "" || channel == "" {
+		t.Skip("SLACK_BOT_TOKEN/SLACK_CHANNEL not set — skipping live Slack delivery test")
+	}
+
+	logger := mockslog.NewLog(t)
+	manager := notification.NewManager(logger, nil)
+	manager.Extend(slack.NewChannel(token, nil))
+
+	n := &richNotification{msg: slack.Message{Text: "Goravel Slack integration test — live delivery"}}
+
+	err := manager.Route("slack", channel).NotifyNow(n)
+	assert.NoError(t, err)
+}
