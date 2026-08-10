@@ -1,0 +1,25 @@
+name: Test Slack
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+env:
+  # Used by the live-delivery test in slack_live_test.go: skipped
+  # locally when these are unset, exercised for real on every CI run.
+  # Need a bot token (chat:write scope) and a channel the bot is
+  # invited to. Same secrets-driven pattern as the mail workflow.
+  SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+  SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+jobs:
+  slack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+      - name: Install dependencies
+        run: go mod tidy
+      - name: Run tests
+        run: go test ./...
