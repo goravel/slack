@@ -4,24 +4,12 @@ import (
 	contractsnotification "github.com/goravel/framework/contracts/notification"
 )
 
-// Notification is implemented by notifications that want full control
-// over the outgoing Slack message. If a notification going through the
-// "slack" channel doesn't implement this, a minimal default message
-// (just the notification's type name) is sent instead.
 type Notification interface {
 	contractsnotification.Notification
 	// ToSlack returns the Message to post via the Slack Web API.
 	ToSlack(notifiable contractsnotification.Notifiable) Message
 }
 
-// Message is a chat.postMessage payload. See
-// https://api.slack.com/methods/chat.postMessage for field semantics.
-//
-// No Blocks (Block Kit) field — slack-go/slack's MsgOptionBlocks needs
-// typed Block objects, not raw JSON, and building a typed Block Kit
-// API is out of scope for this rewrite. Attachments cover the common
-// "title + fields + color" notification case; add Block Kit support
-// later if a real need shows up.
 type Message struct {
 	// Text is the fallback/plain-text message body.
 	Text string
