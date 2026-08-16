@@ -32,19 +32,9 @@ func TestServiceProviderRegister_IsNoOp(t *testing.T) {
 	})
 }
 
-// expectPublishes sets up the two calls Boot() now makes
-// unconditionally, right at the top, before any of the facade
-// nil-checks — every Boot() test needs this regardless of which
-// branch it's exercising afterward.
-func expectPublishes(app *mocksfoundation.Application) {
-	app.EXPECT().ConfigPath("slack.go").Return("config/slack.go").Once()
-	app.EXPECT().Publishes(modulePath, map[string]string{"config/slack.go": "config/slack.go"}).Once()
-}
-
 func TestServiceProviderBoot_SkipsWhenNotificationFacadeNotSet(t *testing.T) {
 	provider := &ServiceProvider{}
 	app := mocksfoundation.NewApplication(t)
-	expectPublishes(app)
 	app.EXPECT().MakeNotification().Return(nil).Once()
 
 	assert.NotPanics(t, func() {
@@ -55,7 +45,6 @@ func TestServiceProviderBoot_SkipsWhenNotificationFacadeNotSet(t *testing.T) {
 func TestServiceProviderBoot_SkipsWhenConfigFacadeNotSet(t *testing.T) {
 	provider := &ServiceProvider{}
 	app := mocksfoundation.NewApplication(t)
-	expectPublishes(app)
 	mgr := mocksnotification.NewManager(t)
 	app.EXPECT().MakeNotification().Return(mgr).Once()
 	app.EXPECT().MakeConfig().Return(nil).Once()
@@ -68,7 +57,6 @@ func TestServiceProviderBoot_SkipsWhenConfigFacadeNotSet(t *testing.T) {
 func TestServiceProviderBoot_ExtendsNotificationManager(t *testing.T) {
 	provider := &ServiceProvider{}
 	app := mocksfoundation.NewApplication(t)
-	expectPublishes(app)
 	mgr := mocksnotification.NewManager(t)
 	config := mocksconfig.NewConfig(t)
 

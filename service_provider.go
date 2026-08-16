@@ -6,8 +6,6 @@ import (
 	"github.com/goravel/framework/support/color"
 )
 
-const modulePath = "github.com/goravel/slack"
-
 type ServiceProvider struct{}
 
 func (r *ServiceProvider) Relationship() binding.Relationship {
@@ -22,15 +20,10 @@ func (r *ServiceProvider) Relationship() binding.Relationship {
 }
 
 func (r *ServiceProvider) Register(app foundation.Application) {
-	// Nothing to register.
+	// Nothing to register — see type doc comment.
 }
 
 func (r *ServiceProvider) Boot(app foundation.Application) {
-
-	app.Publishes(modulePath, map[string]string{
-		"config/slack.go": app.ConfigPath("slack.go"),
-	})
-
 	notificationFacade := app.MakeNotification()
 	if notificationFacade == nil {
 		color.Warningln("Notification Facade is not initialized. Skipping Slack channel registration.")
@@ -45,5 +38,5 @@ func (r *ServiceProvider) Boot(app foundation.Application) {
 
 	token := config.GetString("slack.token")
 
-	notificationFacade.Extend(NewChannel(token, nil))
+	notificationFacade.Extend(NewChannel(token))
 }

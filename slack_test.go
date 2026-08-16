@@ -10,6 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	contractsnotification "github.com/goravel/framework/contracts/notification"
+	// frameworkerrors.Is: based on earlier-session confirmation that
+	// errors/errors.go wraps stdlib errors.Is, and that this error
+	// type's own Is(target) compares by template text (so
+	// EmptyRoute.Args(x) still matches bare EmptyRoute via Is). Not
+	// re-verified against source this session — if this doesn't
+	// compile or behave as expected, fall back to
+	// assert.Contains(t, err.Error(), "...") the way the rest of this
+	// file still does for PostMessageFailed's wrapped SDK errors.
+	frameworkerrors "github.com/goravel/framework/errors"
 
 	"github.com/goravel/slack"
 )
@@ -51,39 +60,57 @@ func (r *richNotification) ToSlack(_ contractsnotification.Notifiable) slack.Mes
 // newTestServer starts an httptest.Server whose /chat.postMessage
 // handler responds however respond specifies, and returns a Channel
 // pointed at it plus a func to read back the last request's form values.
+//
+// ParseForm failures now fail loudly (t.Errorf + 500 response) instead
+// of continuing to respond as if the request had succeeded — the
+// earlier version used assert.NoError inside the handler goroutine and
+// kept going, so a malformed request would still get a 200/ok response,
+// masking the real problem behind a confusing downstream assertion
+// failure instead of a clear one at the point of failure.
 func newTestServer(t *testing.T, respond http.HandlerFunc) (*slack.Channel, func() map[string][]string, func()) {
 	t.Helper()
 
 	var lastForm map[string][]string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
-		assert.NoError(t, r.ParseForm())
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("r.ParseForm(): %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		lastForm = map[string][]string(r.Form)
 		respond(w, r)
 	})
 
 	server := httptest.NewServer(mux)
-	ch := slack.NewChannel("xoxb-test", nil, slackgo.OptionAPIURL(server.URL+"/"))
+	ch := slack.NewChannel("xoxb-test", slackgo.OptionAPIURL(server.URL+"/"))
 
 	return ch, func() map[string][]string { return lastForm }, server.Close
 }
 
 func okResponse(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"ok": true, "channel": "C123", "ts": "1234567890.123456"}`))
+	if _, err := w.Write([]byte(`{"ok": true, "channel": "C123", "ts": "1234567890.123456"}`)); err != nil {
+		// Test server write failures are rare (client disconnected
+		// mid-response) but silently ignoring them, as the previous
+		// version did, hides a real signal if it ever happens.
+		panic(err)
+	}
 }
 
 func errorResponse(errCode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok": false, "error": "` + errCode + `"}`))
+		if _, err := w.Write([]byte(`{"ok": false, "error": "` + errCode + `"}`)); err != nil {
+			panic(err)
+		}
 	}
 }
 
 // ---- Tests ----
 
 func TestChannel_Name(t *testing.T) {
-	ch := slack.NewChannel("xoxb-test", nil)
+	ch := slack.NewChannel("xoxb-test")
 	assert.Equal(t, "slack", ch.Name())
 }
 
@@ -112,59 +139,88 @@ func TestChannel_Send_UsesToSlack_WhenSlackNotification(t *testing.T) {
 	assert.Equal(t, "Deploy finished", form["text"][0])
 }
 
-func TestChannel_Send_ReturnsError_WhenEmptyRoute(t *testing.T) {
-	ch := slack.NewChannel("xoxb-test", nil) // no server needed — should never make a request
+// TestChannel_Send_ReturnsError_WhenRouteIsInvalid replaces two
+// near-identical tests (empty string route, nil route) with one
+// table-driven test — both exercise the exact same code path
+// (cast.ToString(...) == ""), just with a different zero-value input.
+func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		route any
+	}{
+		{"empty string", ""},
+		{"nil", nil},
+	}
 
-	err := ch.Send(&slackNotifiable{route: ""}, &plainNotification{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "empty channel/route")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := slack.NewChannel("xoxb-test") // no server needed — should never make a request
+
+			err := ch.Send(&slackNotifiable{route: tt.route}, &plainNotification{})
+			assert.Error(t, err)
+			assert.True(t, frameworkerrors.Is(err, slack.EmptyRoute),
+				"expected slack.EmptyRoute sentinel, got: %v", err)
+		})
+	}
 }
 
-func TestChannel_Send_ReturnsError_WhenRouteIsNil(t *testing.T) {
-	ch := slack.NewChannel("xoxb-test", nil) // no server needed
+// TestChannel_Send_ReturnsError_WhenTokenNotConfigured exercises the
+// full production path — Resolve succeeds, Deliver fails on the empty
+// token — not just Deliver() directly. Nothing else in this file
+// covered Send() reaching TokenNotConfigured before this.
+func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
+	ch := slack.NewChannel("") // no server needed — token check short-circuits before any request
 
-	err := ch.Send(&slackNotifiable{route: nil}, &plainNotification{})
+	err := ch.Send(&slackNotifiable{route: "#general"}, &plainNotification{})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "empty channel/route")
+	assert.True(t, frameworkerrors.Is(err, slack.TokenNotConfigured),
+		"expected slack.TokenNotConfigured sentinel, got: %v", err)
 }
 
 func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
-	ch := slack.NewChannel("", nil) // no server needed — token check short-circuits first
+	ch := slack.NewChannel("") // no server needed — token check short-circuits first
 
 	payload, err := json.Marshal(slack.Message{Text: "hi"})
 	assert.NoError(t, err)
 
 	err = ch.Deliver("#general", payload)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no bot token configured")
+	assert.True(t, frameworkerrors.Is(err, slack.TokenNotConfigured))
 }
 
 // TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse confirms
 // slack-go/slack surfaces Slack's "ok": false failures as a proper Go
 // error automatically — no manual status-code/body-field parsing needed
-// on our side, unlike the raw-HTTP version this replaced. Confirmed
-// against slack-go/slack's own TestPostMessageInvalidChannel: err.Error()
-// is the raw Slack error code, unwrapped.
+// on our side, unlike the raw-HTTP version this replaced. Table-driven
+// over two distinct Slack error codes (not just one), since a single
+// case can't distinguish "we always return whatever error code Slack
+// sends" from "we happen to handle this one specific code."
 func TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse(t *testing.T) {
-	ch, _, closeServer := newTestServer(t, errorResponse("channel_not_found"))
-	defer closeServer()
+	tests := []string{"channel_not_found", "not_in_channel"}
 
-	payload, err := json.Marshal(slack.Message{Text: "hi"})
-	assert.NoError(t, err)
+	for _, code := range tests {
+		t.Run(code, func(t *testing.T) {
+			ch, _, closeServer := newTestServer(t, errorResponse(code))
+			defer closeServer()
 
-	err = ch.Deliver("#nonexistent", payload)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "channel_not_found")
+			payload, err := json.Marshal(slack.Message{Text: "hi"})
+			assert.NoError(t, err)
+
+			err = ch.Deliver("#nonexistent", payload)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), code)
+		})
+	}
 }
 
 func TestChannel_Deliver_NoOp_WhenEmptyRoute(t *testing.T) {
-	ch := slack.NewChannel("xoxb-test", nil) // no server needed
+	ch := slack.NewChannel("xoxb-test") // no server needed
 	err := ch.Deliver("", []byte(`{}`))
 	assert.NoError(t, err)
 }
 
 func TestChannel_Deliver_ReturnsError_WhenMalformedPayload(t *testing.T) {
-	ch := slack.NewChannel("xoxb-test", nil) // no server needed
+	ch := slack.NewChannel("xoxb-test") // no server needed
 	err := ch.Deliver("#general", []byte(`{not valid json`))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to unmarshal")

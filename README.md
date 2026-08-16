@@ -21,7 +21,7 @@ locked to whichever single channel an Incoming Webhook was created for.
 
 | goravel/slack | goravel/framework |
 |----------------|--------------------|
-| v1.0.*         | v1.18.*            |
+| v1.18.*         | v1.18.*            |
 
 ## Install
 
@@ -37,16 +37,9 @@ manually.
 
 ## Configuration
 
-Publish the config file, then set your bot token:
-
-```shell
-./artisan vendor:publish
-```
-
-This writes `config/slack.go` into your app (`package:install` only
-wires the service provider — publishing config is the separate step
-Goravel packages use for this, matching `app.Publishes(...)`'s
-documented pattern). Then in `.env`:
+`./artisan package:install github.com/goravel/slack` generates
+`config/slack.go` in your app automatically — no separate publish step
+needed. Set your bot token in `.env`:
 
 ```
 SLACK_BOT_TOKEN=xoxb-your-token-here
@@ -56,16 +49,20 @@ Create a bot at [api.slack.com/apps](https://api.slack.com/apps) with
 the `chat:write` scope, then invite it to any channel it needs to post
 in — a bot can only post to channels it's been added to.
 
-The published config:
+The generated config:
 
 ```go
 package config
 
-import "github.com/goravel/framework/facades"
+import (
+	"github.com/goravel/framework/facades"
+)
 
 func init() {
-	facades.Config().Add("slack", map[string]any{
-		"token": facades.Config().Env("SLACK_BOT_TOKEN", ""),
+	config := facades.Config()
+
+	config.Add("slack", map[string]any{
+		"token": config.Env("SLACK_BOT_TOKEN", ""),
 	})
 }
 ```
@@ -133,19 +130,34 @@ facades.Notification().
 
 ## Testing
 
-Inject a mock `client.Factory` directly — `slack.NewChannel` takes its
-HTTP dependency via constructor, the same way every other built-in
-notification channel does, so nothing here needs `facades.Http().Fake()`
-or a real network call:
+`slack.NewChannel` takes `slack-go/slack`'s own variadic `Option`s — use
+`OptionAPIURL` to point requests at an `httptest.Server` instead of
+hitting the real Slack API:
 
 ```go
-http := mocksclient.NewFactory(t)
-http.EXPECT().WithToken("xoxb-test").Return(http).Once()
-http.EXPECT().WithHeader("Content-Type", "application/json; charset=utf-8").Return(http).Once()
-http.EXPECT().Post(mock.Anything, mock.Anything).Return(resp, nil).Once()
+mux := http.NewServeMux()
+mux.HandleFunc("/chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(`{"ok": true}`))
+})
+server := httptest.NewServer(mux)
+defer server.Close()
 
-ch := slack.NewChannel(http, "xoxb-test")
+ch := slack.NewChannel("xoxb-test", slackgo.OptionAPIURL(server.URL+"/"))
 ```
+
+Need a custom `*http.Client` instead (a shared connection pool, a proxy,
+request logging)? Pass `slackgo.OptionHTTPClient(yourClient)` the same
+way — there's no separate parameter for it, just another `Option`.
+
+## Why slack-go/slack instead of a hand-rolled HTTP client?
+
+It's the de facto standard, actively maintained Go Slack SDK, and it
+already handles Slack's biggest testing gotcha for you: Slack's Web API
+returns HTTP 200 even when a request fails — the real success/failure
+signal is the `"ok"` boolean in the JSON response body, not the status
+code. `slack-go/slack`'s `PostMessage` surfaces that as a normal Go
+`error` automatically, so this package doesn't do any manual status-code
+or response-body parsing itself.
 
 ## Why not Incoming Webhooks?
 
@@ -155,12 +167,6 @@ pick a different channel per notification. The Web API's `chat.postMessage`
 takes the target channel as a request parameter instead, so a single bot
 token can post anywhere it's been invited, and `RouteNotificationFor`
 can vary per notifiable the same way the mail and database channels do.
-
-One thing worth knowing if you're debugging delivery failures: Slack's
-Web API returns HTTP 200 even when a request fails — the real success/
-failure signal is the `"ok"` boolean in the JSON response body, not the
-status code. This package checks that correctly; if you're ever
-inspecting responses yourself, don't trust the status code alone.
 
 ## License
 
