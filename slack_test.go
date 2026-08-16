@@ -6,21 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	contractsnotification "github.com/goravel/framework/contracts/notification"
+	frameworkerrors "github.com/goravel/framework/errors"
+	"github.com/goravel/slack"
+	"github.com/goravel/slack/contracts"
 	slackgo "github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
-
-	contractsnotification "github.com/goravel/framework/contracts/notification"
-	// frameworkerrors.Is: based on earlier-session confirmation that
-	// errors/errors.go wraps stdlib errors.Is, and that this error
-	// type's own Is(target) compares by template text (so
-	// EmptyRoute.Args(x) still matches bare EmptyRoute via Is). Not
-	// re-verified against source this session — if this doesn't
-	// compile or behave as expected, fall back to
-	// assert.Contains(t, err.Error(), "...") the way the rest of this
-	// file still does for PostMessageFailed's wrapped SDK errors.
-	frameworkerrors "github.com/goravel/framework/errors"
-
-	"github.com/goravel/slack"
 )
 
 // ---- Fakes ----
@@ -40,33 +31,15 @@ func (p *plainNotification) Via(_ contractsnotification.Notifiable) []string {
 	return []string{"slack"}
 }
 
-type richNotification struct{ msg slack.Message }
+type richNotification struct{ msg contracts.Message }
 
 func (r *richNotification) Via(_ contractsnotification.Notifiable) []string { return []string{"slack"} }
-func (r *richNotification) ToSlack(_ contractsnotification.Notifiable) slack.Message {
+func (r *richNotification) ToSlack(_ contractsnotification.Notifiable) contracts.Message {
 	return r.msg
 }
 
 // ---- Test server helpers ----
-//
-// slack-go/slack's PostMessage sends application/x-www-form-urlencoded
-// data (confirmed against the real slack-go/slack test suite, e.g.
-// chat_test.go — every handler there uses r.ParseForm(), not JSON
-// decoding), and OptionAPIURL(u) redirects the client at a given base
-// URL — also confirmed directly from slack-go/slack's own source
-// (slack.go: "OptionAPIURL set the url for the client. only useful for
-// testing.").
 
-// newTestServer starts an httptest.Server whose /chat.postMessage
-// handler responds however respond specifies, and returns a Channel
-// pointed at it plus a func to read back the last request's form values.
-//
-// ParseForm failures now fail loudly (t.Errorf + 500 response) instead
-// of continuing to respond as if the request had succeeded — the
-// earlier version used assert.NoError inside the handler goroutine and
-// kept going, so a malformed request would still get a 200/ok response,
-// masking the real problem behind a confusing downstream assertion
-// failure instead of a clear one at the point of failure.
 func newTestServer(t *testing.T, respond http.HandlerFunc) (*slack.Channel, func() map[string][]string, func()) {
 	t.Helper()
 
@@ -130,7 +103,7 @@ func TestChannel_Send_UsesToSlack_WhenSlackNotification(t *testing.T) {
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
-	n := &richNotification{msg: slack.Message{Text: "Deploy finished"}}
+	n := &richNotification{msg: contracts.Message{Text: "Deploy finished"}}
 	err := ch.Send(&slackNotifiable{route: "#alerts"}, n)
 	assert.NoError(t, err)
 
@@ -139,10 +112,6 @@ func TestChannel_Send_UsesToSlack_WhenSlackNotification(t *testing.T) {
 	assert.Equal(t, "Deploy finished", form["text"][0])
 }
 
-// TestChannel_Send_ReturnsError_WhenRouteIsInvalid replaces two
-// near-identical tests (empty string route, nil route) with one
-// table-driven test — both exercise the exact same code path
-// (cast.ToString(...) == ""), just with a different zero-value input.
 func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -164,10 +133,6 @@ func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {
 	}
 }
 
-// TestChannel_Send_ReturnsError_WhenTokenNotConfigured exercises the
-// full production path — Resolve succeeds, Deliver fails on the empty
-// token — not just Deliver() directly. Nothing else in this file
-// covered Send() reaching TokenNotConfigured before this.
 func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 	ch := slack.NewChannel("") // no server needed — token check short-circuits before any request
 
@@ -180,7 +145,7 @@ func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 	ch := slack.NewChannel("") // no server needed — token check short-circuits first
 
-	payload, err := json.Marshal(slack.Message{Text: "hi"})
+	payload, err := json.Marshal(contracts.Message{Text: "hi"})
 	assert.NoError(t, err)
 
 	err = ch.Deliver("#general", payload)
@@ -188,13 +153,6 @@ func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 	assert.True(t, frameworkerrors.Is(err, slack.ErrorTokenNotConfigured))
 }
 
-// TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse confirms
-// slack-go/slack surfaces Slack's "ok": false failures as a proper Go
-// error automatically — no manual status-code/body-field parsing needed
-// on our side, unlike the raw-HTTP version this replaced. Table-driven
-// over two distinct Slack error codes (not just one), since a single
-// case can't distinguish "we always return whatever error code Slack
-// sends" from "we happen to handle this one specific code."
 func TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse(t *testing.T) {
 	tests := []string{"channel_not_found", "not_in_channel"}
 
@@ -203,7 +161,7 @@ func TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse(t *testing.T) {
 			ch, _, closeServer := newTestServer(t, errorResponse(code))
 			defer closeServer()
 
-			payload, err := json.Marshal(slack.Message{Text: "hi"})
+			payload, err := json.Marshal(contracts.Message{Text: "hi"})
 			assert.NoError(t, err)
 
 			err = ch.Deliver("#nonexistent", payload)
@@ -230,10 +188,10 @@ func TestChannel_Deliver_SendsAttachments(t *testing.T) {
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
-	payload, err := json.Marshal(slack.Message{
+	payload, err := json.Marshal(contracts.Message{
 		Text: "Invoice paid",
-		Attachments: []slack.Attachment{
-			{Title: "Details", Color: "good", Fields: []slack.Field{
+		Attachments: []contracts.Attachment{
+			{Title: "Details", Color: "good", Fields: []contracts.Field{
 				{Title: "Amount", Value: "$99.00", Short: true},
 			}},
 		},
@@ -247,20 +205,13 @@ func TestChannel_Deliver_SendsAttachments(t *testing.T) {
 	assert.Contains(t, form, "attachments")
 }
 
-// TestChannel_Deliver_MapsAttachmentTimestamp confirms the
-// Attachment.Timestamp → slack.Attachment.Ts (json.Number) conversion —
-// confirmed directly against the real slack-go/slack source
-// (attachments.go: `Ts json.Number`), not guessed. Attachments are sent
-// as a single JSON-encoded form field ("attachments"), so this decodes
-// that field back out to check the ts value round-tripped correctly as
-// a number, not a string that happens to look like one.
 func TestChannel_Deliver_MapsAttachmentTimestamp(t *testing.T) {
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
-	payload, err := json.Marshal(slack.Message{
+	payload, err := json.Marshal(contracts.Message{
 		Text: "Deploy finished",
-		Attachments: []slack.Attachment{
+		Attachments: []contracts.Attachment{
 			{Title: "Details", Timestamp: 1700000000},
 		},
 	})
@@ -281,12 +232,11 @@ func TestChannel_Deliver_MapsAttachmentTimestamp(t *testing.T) {
 }
 
 func TestChannel_Deliver_SendsThreadTS(t *testing.T) {
-	// "thread_ts" confirmed directly against slack-go/slack's real
-	// source (chat.go: MsgOptionTS does config.values.Set("thread_ts", ts)).
+
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
-	payload, err := json.Marshal(slack.Message{Text: "reply", ThreadTS: "1234.5678"})
+	payload, err := json.Marshal(contracts.Message{Text: "reply", ThreadTS: "1234.5678"})
 	assert.NoError(t, err)
 
 	err = ch.Deliver("#general", payload)

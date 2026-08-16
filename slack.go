@@ -26,6 +26,8 @@ import (
 	"github.com/spf13/cast"
 
 	contractsnotification "github.com/goravel/framework/contracts/notification"
+
+	"github.com/goravel/slack/contracts"
 )
 
 // defaultTimeout bounds every chat.postMessage call. Without a
@@ -83,8 +85,8 @@ func (c *Channel) Resolve(
 		return "", nil, ErrorEmptyRoute.Args(notifiable)
 	}
 
-	var msg Message
-	if sn, ok := n.(Notification); ok {
+	var msg contracts.Message
+	if sn, ok := n.(contracts.Notification); ok {
 		msg = sn.ToSlack(notifiable)
 	} else {
 		msg = c.defaultMessage(n)
@@ -106,7 +108,7 @@ func (c *Channel) Deliver(route string, payload []byte) error {
 		return ErrorTokenNotConfigured
 	}
 
-	var msg Message
+	var msg contracts.Message
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		return ErrorUnmarshalPayload.Args(err)
 	}
@@ -134,14 +136,14 @@ func (c *Channel) Deliver(route string, payload []byte) error {
 	return nil
 }
 
-func (c *Channel) defaultMessage(n contractsnotification.Notification) Message {
+func (c *Channel) defaultMessage(n contractsnotification.Notification) contracts.Message {
 	// %T alone would put a raw Go type path (e.g.
 	// "*myservice.InvoicePaid") directly into a Slack message visible
 	// to end users — fine as a log line, not as something a human
 	// reads in a channel. Matches the phrasing MailChannel's own
 	// default message uses ("You have a new %T notification.") rather
 	// than exposing the bare type.
-	return Message{Text: fmt.Sprintf("You have a new %T notification.", n)}
+	return contracts.Message{Text: fmt.Sprintf("You have a new %T notification.", n)}
 }
 
 // toSDKAttachments maps our own Attachment type to slack-go/slack's.
@@ -149,7 +151,7 @@ func (c *Channel) defaultMessage(n contractsnotification.Notification) Message {
 // real slack-go/slack source (attachments.go: `Ts json.Number
 // `json:"ts,omitempty"“), not guessed; json.Number is just a string
 // underneath, hence the strconv.FormatInt conversion below.
-func toSDKAttachments(attachments []Attachment) []slack.Attachment {
+func toSDKAttachments(attachments []contracts.Attachment) []slack.Attachment {
 	out := make([]slack.Attachment, 0, len(attachments))
 	for i := range attachments {
 		a := &attachments[i] // avoid copying the struct on each iteration

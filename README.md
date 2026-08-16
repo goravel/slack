@@ -21,7 +21,7 @@ locked to whichever single channel an Incoming Webhook was created for.
 
 | goravel/slack | goravel/framework |
 |----------------|--------------------|
-| v1.18.*         | v1.18.*            |
+| v1.0.*         | v1.18.*            |
 
 ## Install
 
@@ -69,15 +69,15 @@ func init() {
 
 ## Usage
 
-Implement `slack.Notification` on any notification and add `"slack"` to
-its `Via()` list:
+Implement `contracts.Notification` on any notification and add
+`"slack"` to its `Via()` list:
 
 ```go
 package notifications
 
 import (
 	"github.com/goravel/framework/contracts/notification"
-	"github.com/goravel/slack"
+	"github.com/goravel/slack/contracts"
 )
 
 type InvoicePaid struct {
@@ -88,13 +88,13 @@ func (n *InvoicePaid) Via(notifiable notification.Notifiable) []string {
 	return []string{"slack"}
 }
 
-func (n *InvoicePaid) ToSlack(notifiable notification.Notifiable) slack.Message {
-	return slack.Message{
+func (n *InvoicePaid) ToSlack(notifiable notification.Notifiable) contracts.Message {
+	return contracts.Message{
 		Text: "Invoice #" + n.Invoice.Number + " was paid.",
-		Attachments: []slack.Attachment{
+		Attachments: []contracts.Attachment{
 			{
 				Color: "good",
-				Fields: []slack.Field{
+				Fields: []contracts.Field{
 					{Title: "Amount", Value: n.Invoice.Amount, Short: true},
 					{Title: "Customer", Value: n.Invoice.CustomerName, Short: true},
 				},
@@ -116,9 +116,9 @@ func (u *User) RouteNotificationFor(channel string) any {
 }
 ```
 
-A notification that doesn't implement `slack.Notification` still gets a
-minimal default message (its Go type name) if `"slack"` is in `Via()` —
-useful for quick alerts without writing a `ToSlack` method.
+A notification that doesn't implement `contracts.Notification` still
+gets a minimal default message (its Go type name) if `"slack"` is in
+`Via()` — useful for quick alerts without writing a `ToSlack` method.
 
 ### On-demand notifications
 
