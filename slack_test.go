@@ -158,8 +158,8 @@ func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {
 
 			err := ch.Send(&slackNotifiable{route: tt.route}, &plainNotification{})
 			assert.Error(t, err)
-			assert.True(t, frameworkerrors.Is(err, slack.EmptyRoute),
-				"expected slack.EmptyRoute sentinel, got: %v", err)
+			assert.True(t, frameworkerrors.Is(err, slack.ErrorEmptyRoute),
+				"expected slack.ErrorEmptyRoute sentinel, got: %v", err)
 		})
 	}
 }
@@ -173,8 +173,8 @@ func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 
 	err := ch.Send(&slackNotifiable{route: "#general"}, &plainNotification{})
 	assert.Error(t, err)
-	assert.True(t, frameworkerrors.Is(err, slack.TokenNotConfigured),
-		"expected slack.TokenNotConfigured sentinel, got: %v", err)
+	assert.True(t, frameworkerrors.Is(err, slack.ErrorTokenNotConfigured),
+		"expected slack.ErrorTokenNotConfigured sentinel, got: %v", err)
 }
 
 func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
@@ -185,7 +185,7 @@ func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 
 	err = ch.Deliver("#general", payload)
 	assert.Error(t, err)
-	assert.True(t, frameworkerrors.Is(err, slack.TokenNotConfigured))
+	assert.True(t, frameworkerrors.Is(err, slack.ErrorTokenNotConfigured))
 }
 
 // TestChannel_Deliver_ReturnsError_WhenSlackAPIReturnsOkFalse confirms

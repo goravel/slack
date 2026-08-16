@@ -80,7 +80,7 @@ func (c *Channel) Resolve(
 	// cast.ToString(...) pattern.
 	route := cast.ToString(notifiable.RouteNotificationFor("slack"))
 	if route == "" {
-		return "", nil, EmptyRoute.Args(notifiable)
+		return "", nil, ErrorEmptyRoute.Args(notifiable)
 	}
 
 	var msg Message
@@ -92,7 +92,7 @@ func (c *Channel) Resolve(
 
 	payload, err := json.Marshal(msg)
 	if err != nil {
-		return "", nil, MarshalPayload.Args(n, err)
+		return "", nil, ErrorMarshalPayload.Args(n, err)
 	}
 
 	return route, payload, nil
@@ -103,12 +103,12 @@ func (c *Channel) Deliver(route string, payload []byte) error {
 		return nil
 	}
 	if c.token == "" {
-		return TokenNotConfigured
+		return ErrorTokenNotConfigured
 	}
 
 	var msg Message
 	if err := json.Unmarshal(payload, &msg); err != nil {
-		return UnmarshalPayload.Args(err)
+		return ErrorUnmarshalPayload.Args(err)
 	}
 
 	options := make([]slack.MsgOption, 0, 3) // text + attachments + thread_ts, the common case
@@ -128,7 +128,7 @@ func (c *Channel) Deliver(route string, payload []byte) error {
 	// "ok": false responses already — no manual status-code/body-field
 	// checking needed, unlike the raw-HTTP version this replaced.
 	if _, _, err := c.client.PostMessageContext(ctx, route, options...); err != nil {
-		return PostMessageFailed.Args(err)
+		return ErrorPostMessageFailed.Args(err)
 	}
 
 	return nil

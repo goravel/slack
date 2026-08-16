@@ -64,6 +64,13 @@ func TestServiceProviderBoot_ExtendsNotificationManager(t *testing.T) {
 	app.EXPECT().MakeConfig().Return(config).Once()
 	config.EXPECT().GetString("slack.token").Return("xoxb-test").Once()
 	mgr.EXPECT().Extend(mock.AnythingOfType("*slack.Channel")).Once()
+	// binding.Notification is Bind (transient), not Singleton — without
+	// pinning the extended instance back via app.Instance(...), the
+	// next facades.Notification() call anywhere in the app would get a
+	// fresh, un-extended Manager and the Slack channel would silently
+	// disappear. Confirms Boot() stores back the exact same mgr it just
+	// extended, not some other instance.
+	app.EXPECT().Instance(binding.Notification, mgr).Once()
 
 	provider.Boot(app)
 }
