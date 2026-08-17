@@ -4,15 +4,13 @@ on:
     branches:
       - master
   pull_request:
-env:
-  # Used by the live-delivery test in slack_live_test.go: skipped
-  # locally when these are unset, exercised for real on every CI run.
-  # Need a bot token (chat:write scope) and a channel the bot is
-  # invited to. Same secrets-driven pattern as the mail workflow.
-  SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-  SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+
 jobs:
-  slack:
+  # Offline suite (slack_test.go, service_provider_test.go) — never has
+  # the Slack secrets in its environment, not even ambiently. Runs on
+  # every push and every PR, including forks (which legitimately can't
+  # see repo secrets — this job never needs them, so that's fine).
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -21,5 +19,39 @@ jobs:
           go-version: 'stable'
       - name: Install dependencies
         run: go mod tidy
-      - name: Run tests
-        run: go test ./...
+      - name: Run offline tests
+        run: go test -skip '^TestLiveSlackChannel$' ./...
+
+  # Live-delivery test (slack_live_test.go) — the actual token/channel
+  # secrets are scoped to only the one step that needs them, not the
+  # whole job, per review: broader exposure than necessary means any
+  # other step (checkout, go mod tidy, a compromised dependency) would
+  # have ambient access to a real bot token otherwise.
+  #
+  # PRs from forks don't have secret access (GitHub's own protection,
+  # not something this workflow controls) — TestLiveSlackChannel's own
+  # t.Skip() handles that case gracefully. The verify-secrets step below
+  # is specifically about master, where the secrets are expected to
+  # always be present — if they're not, that's worth a loud failure
+  # instead of a silent, easy-to-miss skip.
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live-test secrets are configured
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ] || [ -z "${{ secrets.SLACK_CHANNEL }}" ]; then
+            echo "::error::SLACK_BOT_TOKEN/SLACK_CHANNEL secrets are not configured on master — TestLiveSlackChannel will silently skip instead of validating real delivery. Check repo Settings > Secrets."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+      - name: Install dependencies
+        run: go mod tidy
+      - name: Run live Slack delivery test
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+        run: go test -run '^TestLiveSlackChannel$' ./...

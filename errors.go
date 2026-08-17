@@ -2,6 +2,10 @@ package slack
 
 import "github.com/goravel/framework/errors"
 
+// Named error constructors for this package, per goravel/framework's
+// convention of declaring errors centrally rather than inline. %v is
+// used throughout, not %w — this error type's Error() method uses
+// fmt.Sprintf, which doesn't support %w.
 var (
 	ErrorEmptyRoute         = errors.New("slack channel: %T.RouteNotificationFor(\"slack\") returned empty channel/route").SetModule(Module)
 	ErrorMarshalPayload     = errors.New("slack channel: failed to marshal payload for %T: %v").SetModule(Module)
@@ -10,4 +14,6 @@ var (
 	ErrorTokenNotConfigured = errors.New("slack channel: no bot token configured (set SLACK_BOT_TOKEN or slack.token)").SetModule(Module)
 )
 
+// Module tags every error in this package for goravel/framework's
+// error-module system.
 const Module = "slack"

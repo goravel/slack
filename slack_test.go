@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	contractsnotification "github.com/goravel/framework/contracts/notification"
@@ -40,10 +41,19 @@ func (r *richNotification) ToSlack(_ contractsnotification.Notifiable) contracts
 
 // ---- Test server helpers ----
 
+// newTestServer starts an httptest.Server whose /chat.postMessage
+// handler responds however respond specifies, and returns a Channel
+// pointed at it plus a func to read back the last request's form
+// values. lastForm is written on the server's own goroutine and read
+// on the test goroutine — guarded by a mutex since httptest.Server
+// serves requests concurrently with the test function continuing past
+// the request that triggered the handler.
 func newTestServer(t *testing.T, respond http.HandlerFunc) (*slack.Channel, func() map[string][]string, func()) {
 	t.Helper()
 
+	var mu sync.Mutex
 	var lastForm map[string][]string
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -51,22 +61,27 @@ func newTestServer(t *testing.T, respond http.HandlerFunc) (*slack.Channel, func
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		mu.Lock()
 		lastForm = map[string][]string(r.Form)
+		mu.Unlock()
 		respond(w, r)
 	})
 
 	server := httptest.NewServer(mux)
 	ch := slack.NewChannel("xoxb-test", slackgo.OptionAPIURL(server.URL+"/"))
 
-	return ch, func() map[string][]string { return lastForm }, server.Close
+	getLastForm := func() map[string][]string {
+		mu.Lock()
+		defer mu.Unlock()
+		return lastForm
+	}
+
+	return ch, getLastForm, server.Close
 }
 
 func okResponse(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(`{"ok": true, "channel": "C123", "ts": "1234567890.123456"}`)); err != nil {
-		// Test server write failures are rare (client disconnected
-		// mid-response) but silently ignoring them, as the previous
-		// version did, hides a real signal if it ever happens.
 		panic(err)
 	}
 }
@@ -85,6 +100,20 @@ func errorResponse(errCode string) http.HandlerFunc {
 func TestChannel_Name(t *testing.T) {
 	ch := slack.NewChannel("xoxb-test")
 	assert.Equal(t, "slack", ch.Name())
+}
+
+// TestChannel_Send_AuthenticatesWithToken confirms the bot token
+// actually reaches the wire — slack-go/slack sends it as a form field
+// ("token"), not a header, so this asserts against form data rather
+// than request headers.
+func TestChannel_Send_AuthenticatesWithToken(t *testing.T) {
+	ch, lastForm, closeServer := newTestServer(t, okResponse)
+	defer closeServer()
+
+	err := ch.Send(&slackNotifiable{route: "#general"}, &plainNotification{})
+	assert.NoError(t, err)
+
+	assert.Equal(t, "xoxb-test", lastForm()["token"][0])
 }
 
 func TestChannel_Send_PostsDefaultMessage_WhenNotSlackNotification(t *testing.T) {
@@ -133,8 +162,12 @@ func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {
 	}
 }
 
+// TestChannel_Send_ReturnsError_WhenTokenNotConfigured exercises the
+// full Send()->Resolve()->Deliver() path with no server involved — the
+// token check now happens in Resolve, so this should fail before any
+// network call would even be attempted.
 func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
-	ch := slack.NewChannel("") // no server needed — token check short-circuits before any request
+	ch := slack.NewChannel("")
 
 	err := ch.Send(&slackNotifiable{route: "#general"}, &plainNotification{})
 	assert.Error(t, err)
@@ -142,13 +175,10 @@ func TestChannel_Send_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
 		"expected slack.ErrorTokenNotConfigured sentinel, got: %v", err)
 }
 
-func TestChannel_Deliver_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
-	ch := slack.NewChannel("") // no server needed — token check short-circuits first
+func TestChannel_Resolve_ReturnsError_WhenTokenNotConfigured(t *testing.T) {
+	ch := slack.NewChannel("")
 
-	payload, err := json.Marshal(contracts.Message{Text: "hi"})
-	assert.NoError(t, err)
-
-	err = ch.Deliver("#general", payload)
+	_, _, err := ch.Resolve(&slackNotifiable{route: "#general"}, &plainNotification{})
 	assert.Error(t, err)
 	assert.True(t, frameworkerrors.Is(err, slack.ErrorTokenNotConfigured))
 }
@@ -184,16 +214,30 @@ func TestChannel_Deliver_ReturnsError_WhenMalformedPayload(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to unmarshal")
 }
 
-func TestChannel_Deliver_SendsAttachments(t *testing.T) {
+// TestChannel_Deliver_MapsAttachmentFields is the full field-mapping
+// test — every Attachment/Field field asserted, not just Timestamp.
+// Decodes the wire-format "attachments" form field back into a
+// structured comparison rather than checking presence/individual
+// values piecemeal, so a regression on any field (not just the one
+// someone thought to check) fails this test.
+func TestChannel_Deliver_MapsAttachmentFields(t *testing.T) {
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
 	payload, err := json.Marshal(contracts.Message{
 		Text: "Invoice paid",
 		Attachments: []contracts.Attachment{
-			{Title: "Details", Color: "good", Fields: []contracts.Field{
-				{Title: "Amount", Value: "$99.00", Short: true},
-			}},
+			{
+				Title:     "Details",
+				Text:      "Invoice #123 has been paid in full.",
+				Color:     "good",
+				Footer:    "Billing system",
+				Timestamp: 1700000000,
+				Fields: []contracts.Field{
+					{Title: "Amount", Value: "$99.00", Short: true},
+					{Title: "Customer", Value: "Acme Corp", Short: true},
+				},
+			},
 		},
 	})
 	assert.NoError(t, err)
@@ -203,36 +247,37 @@ func TestChannel_Deliver_SendsAttachments(t *testing.T) {
 
 	form := lastForm()
 	assert.Contains(t, form, "attachments")
-}
-
-func TestChannel_Deliver_MapsAttachmentTimestamp(t *testing.T) {
-	ch, lastForm, closeServer := newTestServer(t, okResponse)
-	defer closeServer()
-
-	payload, err := json.Marshal(contracts.Message{
-		Text: "Deploy finished",
-		Attachments: []contracts.Attachment{
-			{Title: "Details", Timestamp: 1700000000},
-		},
-	})
-	assert.NoError(t, err)
-
-	err = ch.Deliver("#deploys", payload)
-	assert.NoError(t, err)
-
-	form := lastForm()
-	assert.Contains(t, form, "attachments")
 
 	var decoded []map[string]any
 	assert.NoError(t, json.Unmarshal([]byte(form["attachments"][0]), &decoded))
 	assert.Len(t, decoded, 1)
+
+	att := decoded[0]
+	assert.Equal(t, "Details", att["title"])
+	assert.Equal(t, "Invoice #123 has been paid in full.", att["text"])
+	assert.Equal(t, "good", att["color"])
+	assert.Equal(t, "Billing system", att["footer"])
 	// json.Number round-trips through JSON as a bare number, not a
-	// quoted string — confirms the mapping used the right type.
-	assert.EqualValues(t, 1700000000, decoded[0]["ts"])
+	// quoted string — confirms Timestamp's mapping to Ts json.Number
+	// used the right type, not just the right value.
+	assert.EqualValues(t, 1700000000, att["ts"])
+
+	fields, ok := att["fields"].([]any)
+	assert.True(t, ok)
+	assert.Len(t, fields, 2)
+
+	field0 := fields[0].(map[string]any)
+	assert.Equal(t, "Amount", field0["title"])
+	assert.Equal(t, "$99.00", field0["value"])
+	assert.Equal(t, true, field0["short"])
+
+	field1 := fields[1].(map[string]any)
+	assert.Equal(t, "Customer", field1["title"])
+	assert.Equal(t, "Acme Corp", field1["value"])
+	assert.Equal(t, true, field1["short"])
 }
 
 func TestChannel_Deliver_SendsThreadTS(t *testing.T) {
-
 	ch, lastForm, closeServer := newTestServer(t, okResponse)
 	defer closeServer()
 
