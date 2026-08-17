@@ -26,19 +26,6 @@ queued-delivery bug in `goravel/framework` itself blocking a real
 `v1.0.0` here (see [Known limitations](#known-limitations) below).
 This table will be filled in with real version ranges once both land.
 
-## Known limitations
-
-**Queued Slack delivery doesn't work yet.** `facades.Notification().Send()`
-on a `ShouldQueue` notification enqueues successfully but fails in the
-worker with `NotificationChannelNotFound` — a bug in how
-`goravel/framework`'s notification module registers its transient
-Manager, not something fixable from this package alone. Tracked
-upstream; fix is a one-line change (`app.Bind` → `app.Singleton` for
-`binding.Notification`) pending a framework release.
-
-**Use `SendNow()` / `NotifyNow()` for Slack notifications until this
-lands** — synchronous delivery works correctly today.
-
 ## Install
 
 Run the command below in your project to install the package
