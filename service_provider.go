@@ -39,9 +39,4 @@ func (r *ServiceProvider) Boot(app foundation.Application) {
 	token := config.GetString("slack.token")
 
 	notificationFacade.Extend(NewChannel(token))
-
-	// The notification binding is transient (Bind, not Singleton), so Extend
-	// would be lost the next time MakeNotification() is called. Store this
-	// extended instance back so all future resolutions return the same Manager.
-	app.Instance(binding.Notification, notificationFacade)
 }
