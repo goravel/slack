@@ -3,7 +3,7 @@ module github.com/goravel/slack
 go 1.25.0
 
 require (
-	github.com/goravel/framework v1.18.1-0.20260817032619-265fbc4cc7d3
+	github.com/goravel/framework v1.18.1-0.20260817064937-5c0c403bc25c
 	github.com/slack-go/slack v0.17.3
 	github.com/spf13/cast v1.10.0
 	github.com/stretchr/testify v1.11.1

@@ -19,12 +19,7 @@ locked to whichever single channel an Incoming Webhook was created for.
 
 ## Version
 
-Not yet tagged — this package currently depends on an unreleased
-`goravel/framework` pseudo-version (needs the notification module,
-which hasn't shipped in a tagged release yet), and there's a known
-queued-delivery bug in `goravel/framework` itself blocking a real
-`v1.0.0` here (see [Known limitations](#known-limitations) below).
-This table will be filled in with real version ranges once both land.
+Not yet tagged 
 
 ## Install
 
@@ -52,13 +47,17 @@ Create a bot at [api.slack.com/apps](https://api.slack.com/apps) with
 the `chat:write` scope, then invite it to any channel it needs to post
 in — a bot can only post to channels it's been added to.
 
-The generated config:
+The generated config (import path varies per app — this is what
+`goravel/goravel`'s default skeleton generates; your app's own
+`app/facades` package, not `github.com/goravel/framework/facades`
+directly, since the template substitutes whatever your app's own
+facades package path actually is):
 
 ```go
 package config
 
 import (
-	"github.com/goravel/framework/facades"
+	"goravel/app/facades"
 )
 
 func init() {
@@ -88,7 +87,7 @@ type InvoicePaid struct {
 }
 
 func (n *InvoicePaid) Via(notifiable notification.Notifiable) []string {
-	return []string{"slack"}
+	return []string{contracts.ChannelName}
 }
 
 func (n *InvoicePaid) ToSlack(notifiable notification.Notifiable) contracts.Message {
@@ -107,13 +106,25 @@ func (n *InvoicePaid) ToSlack(notifiable notification.Notifiable) contracts.Mess
 }
 ```
 
-Route to a channel or user by implementing `RouteNotificationFor` on
-your notifiable model:
+Route to a channel or user by implementing `contracts.Routable` on your
+notifiable model — preferred over the generic `RouteNotificationFor`,
+since a typo'd channel name string can't silently drop the route:
+
+```go
+func (u *User) RouteNotificationForSlack(notification notification.Notification) string {
+	return "#billing" // or a user ID for a DM, e.g. "U0123ABC456"
+}
+```
+
+An empty result from `RouteNotificationForSlack` isn't itself an error
+— it falls back to the generic `RouteNotificationFor`, using
+`contracts.ChannelName` instead of a raw `"slack"` string so a typo is
+a compile error, not a silently dropped notification:
 
 ```go
 func (u *User) RouteNotificationFor(channel string) any {
-	if channel == "slack" {
-		return "#billing" // or a user ID for a DM, e.g. "U0123ABC456"
+	if channel == contracts.ChannelName {
+		return "#billing"
 	}
 	return nil
 }
@@ -126,8 +137,10 @@ gets a minimal default message (its Go type name) if `"slack"` is in
 ### On-demand notifications
 
 ```go
+import "github.com/goravel/slack/contracts"
+
 facades.Notification().
-	Route("slack", "#alerts").
+	Route(contracts.ChannelName, "#alerts").
 	Notify(&DeploymentFinished{})
 ```
 

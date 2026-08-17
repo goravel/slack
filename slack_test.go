@@ -20,7 +20,7 @@ import (
 type slackNotifiable struct{ route any }
 
 func (n *slackNotifiable) RouteNotificationFor(channel string) any {
-	if channel == "slack" {
+	if channel == contracts.ChannelName {
 		return n.route
 	}
 	return nil
@@ -37,6 +37,26 @@ type richNotification struct{ msg contracts.Message }
 func (r *richNotification) Via(_ contractsnotification.Notifiable) []string { return []string{"slack"} }
 func (r *richNotification) ToSlack(_ contractsnotification.Notifiable) contracts.Message {
 	return r.msg
+}
+
+// routableNotifiable implements contracts.Routable in addition to
+// Notifiable, to test the typed routing path takes priority over the
+// generic RouteNotificationFor, and that an empty Routable result falls
+// back correctly.
+type routableNotifiable struct {
+	routableResult string
+	fallbackRoute  any
+}
+
+func (n *routableNotifiable) RouteNotificationFor(channel string) any {
+	if channel == contracts.ChannelName {
+		return n.fallbackRoute
+	}
+	return nil
+}
+
+func (n *routableNotifiable) RouteNotificationForSlack(_ contractsnotification.Notification) string {
+	return n.routableResult
 }
 
 // ---- Test server helpers ----
@@ -139,6 +159,41 @@ func TestChannel_Send_UsesToSlack_WhenSlackNotification(t *testing.T) {
 	form := lastForm()
 	assert.Equal(t, "#alerts", form["channel"][0])
 	assert.Equal(t, "Deploy finished", form["text"][0])
+}
+
+// TestChannel_Send_PrefersRoutable_OverGenericRouteNotificationFor
+// confirms Routable takes priority when both are implemented — mirrors
+// MailRoutable's confirmed precedence in the real framework source.
+func TestChannel_Send_PrefersRoutable_OverGenericRouteNotificationFor(t *testing.T) {
+	ch, lastForm, closeServer := newTestServer(t, okResponse)
+	defer closeServer()
+
+	n := &routableNotifiable{
+		routableResult: "#from-routable",
+		fallbackRoute:  "#from-generic", // should be ignored — Routable wins
+	}
+
+	err := ch.Send(n, &plainNotification{})
+	assert.NoError(t, err)
+	assert.Equal(t, "#from-routable", lastForm()["channel"][0])
+}
+
+// TestChannel_Send_FallsBackToGeneric_WhenRoutableReturnsEmpty confirms
+// an empty Routable result is not itself an error — the channel falls
+// back to RouteNotificationFor(ChannelName), matching MailRoutable's
+// confirmed fallback semantics exactly.
+func TestChannel_Send_FallsBackToGeneric_WhenRoutableReturnsEmpty(t *testing.T) {
+	ch, lastForm, closeServer := newTestServer(t, okResponse)
+	defer closeServer()
+
+	n := &routableNotifiable{
+		routableResult: "", // implements Routable but has nothing to say
+		fallbackRoute:  "#from-generic",
+	}
+
+	err := ch.Send(n, &plainNotification{})
+	assert.NoError(t, err)
+	assert.Equal(t, "#from-generic", lastForm()["channel"][0])
 }
 
 func TestChannel_Send_ReturnsError_WhenRouteIsInvalid(t *testing.T) {

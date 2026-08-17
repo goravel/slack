@@ -12,13 +12,10 @@ import (
 	"github.com/spf13/cast"
 
 	contractsnotification "github.com/goravel/framework/contracts/notification"
+
 	"github.com/goravel/slack/contracts"
 )
 
-// defaultTimeout bounds every chat.postMessage call. Without a
-// deadline, a network partition or a hanging Slack API response blocks
-// the calling goroutine indefinitely — worse under a queued worker,
-// where a stuck goroutine holds up other queued deliveries too.
 const defaultTimeout = 30 * time.Second
 
 // Channel delivers notifications to Slack via chat.postMessage.
@@ -31,7 +28,7 @@ func NewChannel(token string, opts ...slack.Option) *Channel {
 	return &Channel{client: slack.New(token, opts...), token: token}
 }
 
-func (c *Channel) Name() string { return "slack" }
+func (c *Channel) Name() string { return contracts.ChannelName }
 
 func (c *Channel) Send(
 	notifiable contractsnotification.Notifiable,
@@ -53,7 +50,13 @@ func (c *Channel) Resolve(
 		return "", nil, ErrorTokenNotConfigured
 	}
 
-	route := cast.ToString(notifiable.RouteNotificationFor("slack"))
+	var route string
+	if r, ok := notifiable.(contracts.Routable); ok {
+		route = r.RouteNotificationForSlack(n)
+	}
+	if route == "" {
+		route = cast.ToString(notifiable.RouteNotificationFor(contracts.ChannelName))
+	}
 	if route == "" {
 		return "", nil, ErrorEmptyRoute.Args(notifiable)
 	}
@@ -104,20 +107,10 @@ func (c *Channel) Deliver(route string, payload []byte) error {
 }
 
 func (c *Channel) defaultMessage(n contractsnotification.Notification) contracts.Message {
-	// %T on a pointer type (the common case — most notifications use a
-	// pointer receiver) includes its own leading "*", e.g.
-	// "*myservice.InvoicePaid". Left as-is, that "*" is a lone,
-	// unmatched Slack mrkdwn bold marker sitting mid-sentence, which
-	// can render unpredictably. Stripped here rather than left for
-	// Slack to interpret.
 	typeName := strings.TrimPrefix(fmt.Sprintf("%T", n), "*")
 	return contracts.Message{Text: fmt.Sprintf("You have a new %s notification.", typeName)}
 }
 
-// toSDKAttachments maps our own Attachment type to slack-go/slack's.
-// Timestamp maps to Ts json.Number (confirmed against slack-go/slack's
-// real source: attachments.go declares `Ts json.Number`); json.Number
-// is a string underneath, hence the strconv.FormatInt conversion.
 func toSDKAttachments(attachments []contracts.Attachment) []slack.Attachment {
 	out := make([]slack.Attachment, 0, len(attachments))
 	for _, a := range attachments {

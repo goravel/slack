@@ -4,6 +4,23 @@ import (
 	contractsnotification "github.com/goravel/framework/contracts/notification"
 )
 
+// ChannelName is the "slack" channel identifier, for
+// Notification.Via/Notifiable.RouteNotificationFor/Manager.Route.
+// Named ChannelName (not Channel) to avoid colliding with this
+// package's own slack.Channel type — mirrors goravel/framework's own
+// ChannelMail/ChannelDatabase constants
+// (contracts/notification/notification.go), which exist for the same
+// reason: a typo in a raw "slack" string literal is a silent no-op, a
+// typo in ChannelName is a compile error.
+const ChannelName = "slack"
+
+// Routable is implemented by a Notifiable to provide the Slack
+// channel/user ID in a type-safe way, without matching the channel name
+// in RouteNotificationFor.
+type Routable interface {
+	RouteNotificationForSlack(notification contractsnotification.Notification) string
+}
+
 // Notification is implemented by notifications that want full control
 // over the outgoing Slack message. If a notification going through the
 // "slack" channel doesn't implement this, a minimal default message
