@@ -1,0 +1,29 @@
+name: Test Slack Live Delivery
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live-test secrets are configured
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ] || [ -z "${{ secrets.SLACK_CHANNEL }}" ]; then
+            echo "::error::SLACK_BOT_TOKEN/SLACK_CHANNEL secrets are not configured on master — TestLiveSlackChannel will silently skip instead of validating real delivery. Check repo Settings > Secrets."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+      - name: Install dependencies
+        run: go mod tidy
+      - name: Run live Slack delivery test
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+        run: go test -run '^TestLiveSlackChannel$' ./...
